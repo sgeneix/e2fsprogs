@@ -291,6 +291,57 @@ out:
 	return err;
 }
 #endif /* TRANSLATE_LINUX_ACLS */
+/*
+static inline uid_t ext2_uid_from_inode(ext2_inode inode) {
+	uid_t i_uid;
+	i_uid = (uid_t)ext2fs_le16_to_cpu(inode.i_uid_low);
+	i_uid |= ext2fs_le16_to_cpu(inode.i_uid_high) << 16;
+	return i_uid;
+}
+
+static inline gid_t ext2_gid_from_inode(ext2_inode inode) {
+	gid_t i_gid;
+	i_gid = (gid_t)ext2fs_le16_to_cpu(inode.i_gid_low);
+	i_gid |= ext2fs_le16_to_cpu(inode.i_gid_high) << 16;
+	return i_gid;
+}
+
+static inline uid_t ext2_uid_from_inode(ext2_inode_large inode) {
+	uid_t i_uid;
+	i_uid = (uid_t)ext2fs_le16_to_cpu(inode.i_uid_low);
+	i_uid |= ext2fs_le16_to_cpu(inode.i_uid_high) << 16;
+	return i_uid;
+}
+
+static inline gid_t ext2_gid_from_inode(ext2_inode_large inode) {
+	gid_t i_gid;
+	i_gid = (gid_t)ext2fs_le16_to_cpu(inode.i_gid_low);
+	i_gid |= ext2fs_le16_to_cpu(inode.i_gid_high) << 16;
+	return i_gid;
+}*/
+
+#define ext2_uid_from_inode(inode)  ((uid_t)ext2fs_le16_to_cpu(inode.i_uid_low)) | (ext2fs_le16_to_cpu(inode.i_uid_high) << 16);
+#define ext2_gid_from_inode(inode)  ((gid_t)ext2fs_le16_to_cpu(inode.i_gid_low)) | (ext2fs_le16_to_cpu(inode.i_gid_high) << 16);
+
+inline void ext2_set_inode_uid(struct ext2_inode_large *inode, uid_t uid) {
+	inode->i_uid_low = ext2fs_cpu_to_le16(ext2fs_low_16_bits(uid));
+	// from fs/ext2/inode.c. Not sure why the if condition...
+	//if (!ei->i_dtime) {
+		inode->i_uid_high = ext2fs_cpu_to_le16(ext2fs_high_16_bits(uid));
+	/*} else {
+		raw_inode->i_uid_high = 0;
+	}*/
+}
+
+inline void ext2_set_inode_gid(struct ext2_inode_large *inode, gid_t gid) {
+	inode->i_gid_low = ext2fs_cpu_to_le16(ext2fs_low_16_bits(gid));
+	// from fs/ext2/inode.c. Not sure why the if condition...
+	//if (!ei->i_dtime) {
+		inode->i_gid_high = ext2fs_cpu_to_le16(ext2fs_high_16_bits(gid));
+	/*} else {
+		raw_inode->i_uid_high = 0;
+	}*/
+}
 
 /*
  * ext2_file_t contains a struct inode, so we can't leave files open.
@@ -626,6 +677,8 @@ static int check_inum_access(ext2_filsys fs, ext2_ino_t ino, mode_t mask)
 	struct ext2_inode inode;
 	mode_t perms;
 	errcode_t err;
+	uid_t i_uid;
+	gid_t i_gid;
 
 	/* no writing to read-only or broken fs */
 	if ((mask & W_OK) && !fs_writeable(fs))
@@ -635,11 +688,13 @@ static int check_inum_access(ext2_filsys fs, ext2_ino_t ino, mode_t mask)
 	if (err)
 		return translate_error(fs, ino, err);
 	perms = inode.i_mode & 0777;
+	i_uid = ext2_uid_from_inode(inode);
+	i_gid = ext2_gid_from_inode(inode);
 
 	dbg_printf("access ino=%d mask=e%s%s%s perms=0%o fuid=%d fgid=%d "
 		   "uid=%d gid=%d\n", ino,
 		   (mask & R_OK ? "r" : ""), (mask & W_OK ? "w" : ""),
-		   (mask & X_OK ? "x" : ""), perms, inode.i_uid, inode.i_gid,
+		   (mask & X_OK ? "x" : ""), perms, i_uid, i_gid,
 		   ctxt->uid, ctxt->gid);
 
 	/* existence check */
@@ -670,14 +725,14 @@ static int check_inum_access(ext2_filsys fs, ext2_ino_t ino, mode_t mask)
 	}
 
 	/* allow owner, if perms match */
-	if (inode.i_uid == ctxt->uid) {
+	if (i_uid == ctxt->uid) {
 		if ((mask & (perms >> 6)) == mask)
 			return 0;
 		return -EACCES;
 	}
 
 	/* allow group, if perms match */
-	if (inode.i_gid == ctxt->gid) {
+	if (i_gid == ctxt->gid) {
 		if ((mask & (perms >> 3)) == mask)
 			return 0;
 		return -EACCES;
@@ -769,6 +824,8 @@ static int stat_inode(ext2_filsys fs, ext2_ino_t ino, struct stat *statbuf)
 	errcode_t err;
 	int ret = 0;
 	struct timespec tv;
+	uid_t i_uid;
+	gid_t i_gid;
 
 	memset(&inode, 0, sizeof(inode));
 	err = ext2fs_read_inode_full(fs, ino, (struct ext2_inode *)&inode,
@@ -776,13 +833,16 @@ static int stat_inode(ext2_filsys fs, ext2_ino_t ino, struct stat *statbuf)
 	if (err)
 		return translate_error(fs, ino, err);
 
+	i_uid = ext2_uid_from_inode(inode);
+	i_gid = ext2_gid_from_inode(inode);
+
 	memcpy(&fakedev, fs->super->s_uuid, sizeof(fakedev));
 	statbuf->st_dev = fakedev;
 	statbuf->st_ino = ino;
 	statbuf->st_mode = inode.i_mode;
 	statbuf->st_nlink = inode.i_links_count;
-	statbuf->st_uid = inode.i_uid;
-	statbuf->st_gid = inode.i_gid;
+	statbuf->st_uid = i_uid;
+	statbuf->st_gid = i_gid;
 	statbuf->st_size = EXT2_I_SIZE(&inode);
 	statbuf->st_blksize = fs->blocksize;
 	statbuf->st_blocks = blocks_from_inode(fs, &inode);
@@ -1004,8 +1064,8 @@ static int op_mknod(const char *path, mode_t mode, dev_t dev)
 	inode.i_links_count = 1;
 	inode.i_extra_isize = sizeof(struct ext2_inode_large) -
 		EXT2_GOOD_OLD_INODE_SIZE;
-	inode.i_uid = ctxt->uid;
-	inode.i_gid = ctxt->gid;
+	ext2_set_inode_uid(&inode, ctxt->uid);
+	ext2_set_inode_gid(&inode, ctxt->gid);
 
 	err = ext2fs_write_new_inode(fs, child, (struct ext2_inode *)&inode);
 	if (err) {
@@ -1128,8 +1188,8 @@ static int op_mkdir(const char *path, mode_t mode)
 		goto out2;
 	}
 
-	inode.i_uid = ctxt->uid;
-	inode.i_gid = ctxt->gid;
+	ext2_set_inode_uid(&inode, ctxt->uid);
+	ext2_set_inode_gid(&inode, ctxt->gid);
 	inode.i_mode = LINUX_S_IFDIR | (mode & ~(S_ISUID | fs->umask)) |
 		       parent_sgid;
 	inode.i_generation = ff->next_generation++;
@@ -1501,8 +1561,8 @@ static int op_symlink(const char *src, const char *dest)
 		goto out2;
 	}
 
-	inode.i_uid = ctxt->uid;
-	inode.i_gid = ctxt->gid;
+	ext2_set_inode_gid(&inode, ctxt->gid);
+	ext2_set_inode_gid(&inode, ctxt->gid);
 	inode.i_generation = ff->next_generation++;
 
 	err = ext2fs_write_inode_full(fs, child, (struct ext2_inode *)&inode,
@@ -1879,6 +1939,8 @@ static int op_chmod(const char *path, mode_t mode)
 	ext2_ino_t ino;
 	struct ext2_inode_large inode;
 	int ret = 0;
+	uid_t i_uid;
+	gid_t i_gid;
 
 	FUSE2FS_CHECK_CONTEXT(ff);
 	fs = ff->fs;
@@ -1898,7 +1960,8 @@ static int op_chmod(const char *path, mode_t mode)
 		goto out;
 	}
 
-	if (ctxt->uid != 0 && ctxt->uid != inode.i_uid) {
+	i_uid = ext2_uid_from_inode(inode);
+	if (ctxt->uid != 0 && ctxt->uid != i_uid) {
 		ret = -EPERM;
 		goto out;
 	}
@@ -1908,7 +1971,8 @@ static int op_chmod(const char *path, mode_t mode)
 	 * of the user's groups, but FUSE only tells us about the primary
 	 * group.
 	 */
-	if (ctxt->uid != 0 && ctxt->gid != inode.i_gid)
+	i_gid = ext2_gid_from_inode(inode);
+	if (ctxt->uid != 0 && ctxt->gid != i_gid)
 		mode &= ~S_ISGID;
 
 	inode.i_mode &= ~0xFFF;
@@ -1938,6 +2002,8 @@ static int op_chown(const char *path, uid_t owner, gid_t group)
 	ext2_ino_t ino;
 	struct ext2_inode_large inode;
 	int ret = 0;
+	uid_t i_uid;
+	gid_t i_gid;
 
 	FUSE2FS_CHECK_CONTEXT(ff);
 	fs = ff->fs;
@@ -1958,26 +2024,29 @@ static int op_chown(const char *path, uid_t owner, gid_t group)
 		goto out;
 	}
 
+	i_uid = ext2_uid_from_inode(inode);
+	i_gid = ext2_gid_from_inode(inode);
+
 	/* FUSE seems to feed us ~0 to mean "don't change" */
 	if (owner != (uid_t) ~0) {
 		/* Only root gets to change UID. */
 		if (ctxt->uid != 0 &&
-		    !(inode.i_uid == ctxt->uid && owner == ctxt->uid)) {
+		    !(i_uid == ctxt->uid && owner == ctxt->uid)) {
 			ret = -EPERM;
 			goto out;
 		}
-		inode.i_uid = owner;
+		ext2_set_inode_uid(&inode, owner);
 	}
 
 	if (group != (gid_t) ~0) {
 		/* Only root or the owner get to change GID. */
-		if (ctxt->uid != 0 && inode.i_uid != ctxt->uid) {
+		if (ctxt->uid != 0 && i_uid != ctxt->uid) {
 			ret = -EPERM;
 			goto out;
 		}
 
 		/* XXX: We /should/ check group membership but FUSE */
-		inode.i_gid = group;
+		ext2_set_inode_gid(&inode, group);
 	}
 
 	ret = update_ctime(fs, ino, &inode);
@@ -2904,8 +2973,8 @@ static int op_create(const char *path, mode_t mode, struct fuse_file_info *fp)
 	inode.i_links_count = 1;
 	inode.i_extra_isize = sizeof(struct ext2_inode_large) -
 		EXT2_GOOD_OLD_INODE_SIZE;
-	inode.i_uid = ctxt->uid;
-	inode.i_gid = ctxt->gid;
+	ext2_set_inode_uid(&inode, ctxt->uid);
+	ext2_set_inode_gid(&inode, ctxt->gid);
 	if (ext2fs_has_feature_extents(fs->super)) {
 		ext2_extent_handle_t handle;
 
@@ -3113,6 +3182,7 @@ static int ioctl_setflags(ext2_filsys fs, struct fuse2fs_file_handle *fh,
 	int ret;
 	__u32 flags = *(__u32 *)data;
 	struct fuse_context *ctxt = fuse_get_context();
+	uid_t i_uid;
 
 	FUSE2FS_CHECK_MAGIC(fs, fh, FUSE2FS_FILE_MAGIC);
 	dbg_printf("%s: ino=%d\n", __func__, fh->ino);
@@ -3122,7 +3192,8 @@ static int ioctl_setflags(ext2_filsys fs, struct fuse2fs_file_handle *fh,
 	if (err)
 		return translate_error(fs, fh->ino, err);
 
-	if (ctxt->uid != 0 && inode.i_uid != ctxt->uid)
+	i_uid = ext2_uid_from_inode(inode);
+	if (ctxt->uid != 0 && i_uid != ctxt->uid)
 		return -EPERM;
 
 	if ((inode.i_flags ^ flags) & ~FUSE2FS_MODIFIABLE_IFLAGS)
@@ -3169,6 +3240,7 @@ static int ioctl_setversion(ext2_filsys fs, struct fuse2fs_file_handle *fh,
 	int ret;
 	__u32 generation = *(__u32 *)data;
 	struct fuse_context *ctxt = fuse_get_context();
+	uid_t i_uid;
 
 	FUSE2FS_CHECK_MAGIC(fs, fh, FUSE2FS_FILE_MAGIC);
 	dbg_printf("%s: ino=%d\n", __func__, fh->ino);
@@ -3177,8 +3249,9 @@ static int ioctl_setversion(ext2_filsys fs, struct fuse2fs_file_handle *fh,
 				     sizeof(inode));
 	if (err)
 		return translate_error(fs, fh->ino, err);
+	i_uid = ext2_uid_from_inode(inode);
 
-	if (ctxt->uid != 0 && inode.i_uid != ctxt->uid)
+	if (ctxt->uid != 0 && i_uid != ctxt->uid)
 		return -EPERM;
 
 	inode.i_generation = generation;
@@ -3773,7 +3846,6 @@ int main(int argc, char *argv[])
 	global_fs->priv_data = &fctx;
 
 	ret = 3;
-
 	if (ext2fs_has_feature_journal_needs_recovery(global_fs->super)) {
 		if (!fctx.ro) {
 			printf(_("%s: recovering journal\n"), fctx.device);

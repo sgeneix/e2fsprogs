@@ -40,6 +40,9 @@
 #define ext2fs_be16_to_cpu(x) ext2fs_swab16((__force __u16)(__be16)(x))
 #endif
 
+#define ext2fs_low_16_bits(x)	((x) & 0xFFFF)
+#define ext2fs_high_16_bits(x)	(((x) & 0xFFFF0000) >> 16)
+
 /*
  * EXT2FS bitmap manipulation routines.
  */

@@ -420,6 +420,7 @@ struct ext2_inode {
 	} osd2;				/* OS dependent 2 */
 };
 
+
 /*
  * Permanent part of an large inode on the disk
  */
@@ -476,6 +477,11 @@ struct ext2_inode_large {
 	__u32	i_version_hi;	/* high 32 bits for 64-bit version */
 	__u32   i_projid;       /* Project ID */
 };
+
+#define i_uid_low       i_uid
+#define i_gid_low       i_gid
+#define i_uid_high      osd2.linux2.l_i_uid_high
+#define i_gid_high      osd2.linux2.l_i_gid_high
 
 #define EXT4_INODE_CSUM_HI_EXTRA_END	\
 	(offsetof(struct ext2_inode_large, i_checksum_hi) + sizeof(__u16) - \
