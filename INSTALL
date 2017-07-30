@@ -20,6 +20,11 @@ kernel and/or glibc 2.2), the use of thread local storage will probably
 cause programs that use the uuid library to core dump.  To disable
 thread local storage, use the configure option --disable-tls.
 
+        You might have to override your CPPFLAGS and LDFLAGS variable. 
+On OS X, for example :
+        CPPFLAGS='-I/usr/local/include -I/usr/local/include/osxfuse/fuse' 
+        LDFLAGS='-L/usr/local/lib'  ../configure 
+
 4)  Compile the programs
 
 	make

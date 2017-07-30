@@ -1561,6 +1561,7 @@ Optional Features:
   --disable-threads       build without multithread safety
   --disable-rpath         do not hardcode runtime library paths
   --disable-fuse2fs	  do not build fuse2fs
+  --enable-fuse2fs        do not build if fuse2fs cannot be built
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
